@@ -5,6 +5,7 @@ const methodOverride = require('method-override')
 const mongoose = require('mongoose');
 
 const Product = require('./models/product');
+const AppError = require('./AppError');
 
 mongoose.connect(
   'mongodb://localhost:27017/farmStand', {
@@ -19,6 +20,12 @@ mongoose.connect(
     console.error(e.message);
   });
 
+function wrapAsync(fn) {
+  return function(req, res, next){
+    fn(req, res, next).catch(e => next(e))
+  }
+}
+
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
 
@@ -28,7 +35,7 @@ app.use(methodOverride('_method'));
 
 const categories = ['fruit', 'vegetable', 'dairy'];
 
-app.get('/products', async (req, res) => {
+app.get('/products', wrapAsync(async (req, res) => {
   const { category } = req.query;
   if (category) {
     const products = await Product.find({ category });
@@ -38,34 +45,34 @@ app.get('/products', async (req, res) => {
     res.render('products/index', { products, category: 'All' });
   }
   
-});
+}));
 
 app.get('/products/new', (req, res) => {
   res.render('products/new', { categories });
 });
 
-app.post('/products', async (req, res) => {
+app.post('/products', wrapAsync (async (req, res) => {
   const newProduct = new Product(req.body);
   await newProduct.save();
   res.redirect(`/products/${newProduct._id}`);
 
 
-})
+}));
 
-app.get('/products/:id', async (req, res) => {
+app.get('/products/:id', wrapAsync(async (req, res) => {
   const { id } = req.params;
   const product = await Product.findById(id);
   res.render('products/show', { product });
-});
+}));
 
-app.get('/products/:id/edit', async (req, res) => {
+app.get('/products/:id/edit', wrapAsync(async (req, res) => {
   const { id } = req.params;
   const product = await Product.findById(id);
   res.render('products/edit', { product, categories });
 
-});
+}));
 
-app.put('/products/:id', async (req, res) => {
+app.put('/products/:id', wrapAsync(async (req, res) => {
   const { id } = req.params;
   const { name, price, category } = req.body;
   const product = await Product.findByIdAndUpdate(id,
@@ -76,16 +83,30 @@ app.put('/products/:id', async (req, res) => {
     });
   res.redirect(`/products/${product._id}`);
 
-})
+}));
 
-app.delete('/products/:id', async (req, res) => {
+app.delete('/products/:id', wrapAsync(async (req, res) => {
   const { id } = req.params;
   await Product.findByIdAndDelete(id);
   res.redirect('/products');
-})
+}));
 
+const handleVAlidationError = err => {
+  console.log(err);
+  return new AppError(`Validation Failed...${err.message}`, 400);
+}
 
+app.use((err, req, res, next) => {
+  if(err.name === 'ValidationError') err = handleVAlidationError(err);
+  if(err.name === 'CastError') err = handleVAlidationError(err);  
+  next(err);
+});
+
+app.use((err, req, res, next) => {
+  const {status = 500, message = 'Something went wrong'} = err;
+  res.status(status).send(message);
+});
 
 app.listen(3000, () => {
   console.log('APP IS LISTENING ON PORT 3000');
-})
+});
